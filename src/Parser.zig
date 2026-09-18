@@ -20,8 +20,8 @@ const ArgPos = enum(u8) {
 };
 
 ctx: *lib.Context,
-inst_buf: std.ArrayListUnmanaged(Inst.Ref) = .{},
-arg_names: std.StringHashMapUnmanaged(ArgPos) = .{},
+inst_buf: std.ArrayListUnmanaged(Inst.Ref) = .empty,
+arg_names: std.StringHashMapUnmanaged(ArgPos) = .empty,
 
 input: [:0]const u8,
 index: usize = 0,

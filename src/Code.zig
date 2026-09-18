@@ -150,9 +150,9 @@ pub const Vm = struct {
     }
 };
 
-insts: std.MultiArrayList(Inst) = .{},
-extra: std.ArrayListUnmanaged(u32) = .{},
-strings: std.ArrayListUnmanaged(u8) = .{},
+insts: std.MultiArrayList(Inst) = .empty,
+extra: std.ArrayListUnmanaged(u32) = .empty,
+strings: std.ArrayListUnmanaged(u8) = .empty,
 
 pub fn deinit(c: *Code, gpa: Allocator) void {
     c.insts.deinit(gpa);

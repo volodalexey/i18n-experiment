@@ -1,0 +1,10 @@
+.{
+    .name = .i18n_experiment,
+    .version = "0.0.0",
+    .fingerprint = 0x52fc6cdbe55f326e,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "",
+    },
+}

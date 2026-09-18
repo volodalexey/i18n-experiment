@@ -31,7 +31,7 @@ test "complex value" {
         \\end
     , "This is a tuple {}!", .{.{
         .{.{ .hello_world, 1 }},
-        "Tämä on monikko { .hello_world, 1 }!",
+        "Tämä on monikko .{ .hello_world, 1 }!",
     }});
 }
 
@@ -104,11 +104,11 @@ fn testFormat(input: [:0]const u8, comptime fmt: []const u8, comptime tests: any
 
     try lib.parse(&ctx, input);
 
-    var out_buf = std.ArrayList(u8).init(a);
-    defer out_buf.deinit();
+    var out_buf = std.ArrayList(u8).empty;
+    defer out_buf.deinit(a);
 
     inline for (tests) |@"test"| {
-        try ctx.format(out_buf.writer(), fmt, @"test"[0]);
+        try ctx.format(&out_buf, fmt, @"test"[0]);
         try std.testing.expectEqualStrings(@as([]const u8, @"test"[1]), out_buf.items);
         out_buf.items.len = 0;
     }

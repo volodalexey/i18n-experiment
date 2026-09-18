@@ -11,7 +11,7 @@ const Context = @This();
 
 pub const Argument = struct {
     val: lib.Value,
-    fmt_options: std.fmt.FormatOptions,
+    fmt_options: std.fmt.Options,
     kind: enum { decimal, scientific, hex },
     case: std.fmt.Case,
     base: u8,
@@ -34,7 +34,7 @@ pub fn deinit(ctx: *Context) void {
 
 pub fn format(
     ctx: *Context,
-    writer: anytype,
+    writer: *std.ArrayList(u8),
     comptime fmt: []const u8,
     args: anytype,
 ) !void {
@@ -110,7 +110,7 @@ pub fn format(
         comptime assert(fmt[i] == '}');
         i += 1;
 
-        const placeholder = comptime std.fmt.Placeholder.parse(fmt[fmt_begin..fmt_end].*);
+        const placeholder = comptime std.fmt.Placeholder.parse(fmt[fmt_begin..fmt_end]);
         const arg_pos = comptime switch (placeholder.arg) {
             .none => null,
             .number => |pos| pos,
@@ -144,7 +144,7 @@ pub fn format(
             @compileError("too few arguments");
 
         query_str = query_str ++ "{}";
-        const fmt_options = std.fmt.FormatOptions{
+        const fmt_options = std.fmt.Options{
             .fill = placeholder.fill,
             .alignment = placeholder.alignment,
             .width = width,
@@ -194,7 +194,7 @@ pub fn format(
     var vm = lib.Code.Vm{ .ctx = ctx, .args = options[0..options_i] };
     defer vm.deinit();
     const rule = (try query(&vm, query_str)) orelse query_str;
-    try render(rule, &vm, writer);
+    try render(rule, &vm, writer, ctx.arena.child_allocator);
 }
 
 pub fn query(vm: *lib.Code.Vm, key: []const u8) !?[]const u8 {
@@ -209,7 +209,7 @@ pub fn query(vm: *lib.Code.Vm, key: []const u8) !?[]const u8 {
     }
 }
 
-pub fn render(rule: []const u8, vm: *lib.Code.Vm, writer: anytype) !void {
+pub fn render(rule: []const u8, vm: *lib.Code.Vm, writer: *std.ArrayList(u8), gpa: Allocator) !void {
     var i: usize = 0;
     var arg_i: u8 = 0;
     while (i < rule.len) {
@@ -226,7 +226,7 @@ pub fn render(rule: []const u8, vm: *lib.Code.Vm, writer: anytype) !void {
             unescape = true;
             i += 1;
         }
-        try writer.writeAll(rule[start_index..i]);
+        try writer.appendSlice(gpa, rule[start_index..i]);
         if (unescape) {
             i += 1;
             continue;
@@ -255,37 +255,35 @@ pub fn render(rule: []const u8, vm: *lib.Code.Vm, writer: anytype) !void {
                 .case = .lower,
                 .base = 10,
                 .val = vm.vars.get(name) orelse {
-                    try writer.print("[USE OF UNDEFINED VARIABLE %{s}]", .{name});
+                    try writer.print(gpa, "[USE OF UNDEFINED VARIABLE %{s}]", .{name});
                     continue;
                 },
             };
 
         arg_i += 1;
         switch (options.val) {
-            .str, .preformatted => |str| try writer.writeAll(str),
-            .bool => |b| try std.fmt.formatBuf(if (b) "true" else "false", options.fmt_options, writer),
+            .str, .preformatted => |str| try writer.appendSlice(gpa, str),
+            .bool => |b| {
+                var tmp: std.Io.Writer.Allocating = .init(gpa);
+                defer tmp.deinit();
+                try tmp.writer.alignBufferOptions(if (b) "true" else "false", options.fmt_options);
+                try writer.appendSlice(gpa, tmp.written());
+            },
             .int => |int| {
-                try std.fmt.formatInt(int, options.base, options.case, options.fmt_options, writer);
+                var tmp: std.Io.Writer.Allocating = .init(gpa);
+                defer tmp.deinit();
+                try tmp.writer.printInt(int, options.base, options.case, options.fmt_options);
+                try writer.appendSlice(gpa, tmp.written());
             },
             .float => |float| {
-                var buf: [std.fmt.format_float.bufferSize(.decimal, f64)]u8 = undefined;
-
-                const s = switch (options.kind) {
-                    .decimal => std.fmt.formatFloat(&buf, float, .{ .mode = .decimal, .precision = options.fmt_options.precision }) catch |err| switch (err) {
-                        error.BufferTooSmall => "(float)",
-                    },
-                    .scientific => std.fmt.formatFloat(&buf, float, .{ .mode = .scientific, .precision = options.fmt_options.precision }) catch |err| switch (err) {
-                        error.BufferTooSmall => "(float)",
-                    },
-                    .hex => hex: {
-                        var buf_stream = std.io.fixedBufferStream(&buf);
-                        std.fmt.formatFloatHexadecimal(float, options.fmt_options, buf_stream.writer()) catch |err| switch (err) {
-                            error.NoSpaceLeft => unreachable,
-                        };
-                        break :hex buf_stream.getWritten();
-                    },
-                };
-                return std.fmt.formatBuf(s, options.fmt_options, writer);
+                var tmp: std.Io.Writer.Allocating = .init(gpa);
+                defer tmp.deinit();
+                switch (options.kind) {
+                    .decimal => try tmp.writer.printFloat(float, options.fmt_options.toNumber(.decimal, options.case)),
+                    .scientific => try tmp.writer.printFloat(float, options.fmt_options.toNumber(.scientific, options.case)),
+                    .hex => try tmp.writer.printFloatHexOptions(float, options.fmt_options.toNumber(.hex, options.case)),
+                }
+                try writer.appendSlice(gpa, tmp.written());
             },
             .none => unreachable,
         }

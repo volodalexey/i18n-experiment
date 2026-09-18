@@ -31,24 +31,25 @@ pub const GenerateDefsStep = struct {
         const new_options = owner.addOptions();
         new_options.addOption(bool, "log_fmts", true);
         const i18n_module = options.compile_step.root_module.import_table.get("i18n").?;
-        i18n_module.import_table.values()[0] = new_options.createModule();
+        i18n_module.addImport("options", new_options.createModule());
         self.step.dependOn(&new_options.step);
         return self;
     }
 
     fn make(step: *Step, options: std.Build.Step.MakeOptions) !void {
         const self: *GenerateDefsStep = @fieldParentPtr("step", step);
+        const io = step.owner.graph.io;
         // Make the compilation step as usual.
         self.compile_step.step.make(options) catch {};
         const log_txt = self.compile_step.step.result_error_bundle.getCompileLogOutput();
 
-        var list = std.ArrayList([]const u8).init(step.owner.allocator);
-        defer list.deinit();
+        var list = std.ArrayList([]const u8).empty;
+        defer list.deinit(step.owner.allocator);
         var start: usize = 0;
         while (true) {
             start = std.mem.indexOfScalarPos(u8, log_txt, start, '"') orelse break;
             const end = std.mem.indexOfScalarPos(u8, log_txt, start, '\n') orelse log_txt.len;
-            try list.append(log_txt[start .. end - 1]);
+            try list.append(step.owner.allocator, log_txt[start .. end - 1]);
             start = end;
         }
         const lessThan = struct {
@@ -59,17 +60,21 @@ pub const GenerateDefsStep = struct {
         std.mem.sort([]const u8, list.items, {}, lessThan);
 
         const file = blk: {
-            var dir = try step.owner.build_root.handle.makeOpenPath("res", .{});
-            defer dir.close();
-            break :blk try dir.createFile("base.def", .{});
+            try step.owner.build_root.handle.createDirPath(io, "res");
+            break :blk try step.owner.build_root.handle.createFile(io, "res/base.def", .{});
         };
-        defer file.close();
-        var buf = std.io.bufferedWriter(file.writer());
-        const w = buf.writer();
-        for (list.items) |item| {
-            try w.print("# def {s}\n", .{item});
+        defer file.close(io);
+        var buf: [4096]u8 = undefined;
+        var file_buf = file.writer(io, &buf);
+        const w = &file_buf.interface;
+        if (list.items.len == 0) {
+            try w.writeAll(log_txt);
+        } else {
+            for (list.items) |item| {
+                try w.print("# def {s}\n", .{item});
+            }
         }
-        try buf.flush();
+        try file_buf.end();
     }
 };
 

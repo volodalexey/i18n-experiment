@@ -13,7 +13,7 @@ pub const Value = union(enum) {
         arena: *std.heap.ArenaAllocator,
         value: anytype,
         comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        options: std.fmt.Options,
     ) !Value {
         const T = @TypeOf(value);
         switch (@typeInfo(T)) {
@@ -44,10 +44,10 @@ pub const Value = union(enum) {
             },
             else => {},
         }
-        var out_buf = std.ArrayList(u8).init(arena.child_allocator);
+        var out_buf: std.Io.Writer.Allocating = .init(arena.child_allocator);
         defer out_buf.deinit();
-        try std.fmt.formatType(value, fmt, options, out_buf.writer(), std.options.fmt_max_depth);
+        try out_buf.writer.printValue(fmt, options, value, std.options.fmt_max_depth);
 
-        return .{ .preformatted = try arena.allocator().dupe(u8, out_buf.items) };
+        return .{ .preformatted = try arena.allocator().dupe(u8, out_buf.written()) };
     }
 };
